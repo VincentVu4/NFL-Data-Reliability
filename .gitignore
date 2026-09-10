@@ -1,0 +1,43 @@
+# Python virtual environment
+.venv/
+venv/
+
+# Python cache and compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Ruff cache
+.ruff_cache/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Generated pipeline data
+data/raw/
+data/processed/
+data/quarantine/
+
+# Pipeline logs
+logs/
+*.log
+
+# VS Code machine-specific settings
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# Jupyter temporary files
+.ipynb_checkpoints/
+
+# Windows files
+Thumbs.db
+Desktop.ini
+

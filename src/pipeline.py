@@ -57,6 +57,38 @@ def save_raw_response(nfl_data, retrieved_at):
 
     return file_path
 
+def save_quarantined_games(rejected_games, retrieved_at):
+    if not rejected_games:
+        logger.info("No rejected games to quarantine")
+        return None
+
+    quarantine_directory = Path("data/quarantine")
+    quarantine_directory.mkdir(parents=True, exist_ok=True)
+
+    timestamp = retrieved_at.strftime("%Y%m%dT%H%M%SZ")
+    file_path = (
+        quarantine_directory
+        / f"rejected_games_{timestamp}.json"
+    )
+
+    quarantine_output = {
+        "retrieved_at": retrieved_at.isoformat(),
+        "source": "ESPN",
+        "rejected_record_count": len(rejected_games),
+        "records": rejected_games
+    }
+
+    with file_path.open("w", encoding="utf-8") as file:
+        json.dump(quarantine_output, file, indent=2)
+
+    logger.warning(
+        "%s rejected games saved to %s",
+        len(rejected_games),
+        file_path
+    )
+
+    return file_path
+
 def parse_games(raw_nfl_data, retrieved_at):
 
     games = []
@@ -108,8 +140,9 @@ def parse_games(raw_nfl_data, retrieved_at):
             "source": "ESPN"
 }
         
+        
         games.append(game)
-
+    games[0]["home_score"] = -3
     return games
 
 def parse_play_by_play():
@@ -130,9 +163,17 @@ def run_pipeline():
     games = parse_games(raw_nfl_data, retrieved_at)
     valid_games, rejected_games = validate_games(games)
 
+    quarantine_file_path = save_quarantined_games(
+        rejected_games,
+        retrieved_at
+    )
+
+    if quarantine_file_path:
+        print(f"Quarantine file: {quarantine_file_path}")
+
     valid_df = pd.DataFrame(valid_games)
     rejected_df = pd.DataFrame(rejected_games)
-
+    
     print(f"Raw file: {raw_file_path}")
     print(f"Parsed games: {len(games)}")
     print(f"Valid games: {len(valid_games)}")
@@ -150,5 +191,3 @@ def run_pipeline():
 if __name__ == "__main__":
     run_pipeline()
 
-if __name__ == "__main__":
-    run_pipeline()

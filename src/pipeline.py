@@ -7,6 +7,9 @@ from pathlib import Path
 import pandas as pd
 import requests
 
+from validation import validate_games
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -119,14 +122,33 @@ def run_pipeline():
     retrieved_at = datetime.now(timezone.utc)
 
     raw_nfl_data = extract_nfl_data()
-    raw_file_path = save_raw_response(raw_nfl_data, retrieved_at)
+    raw_file_path = save_raw_response(
+        raw_nfl_data,
+        retrieved_at
+    )
 
     games = parse_games(raw_nfl_data, retrieved_at)
-    games_df = pd.DataFrame(games)
+    valid_games, rejected_games = validate_games(games)
+
+    valid_df = pd.DataFrame(valid_games)
+    rejected_df = pd.DataFrame(rejected_games)
 
     print(f"Raw file: {raw_file_path}")
-    print(f"Games extracted: {len(games_df)}")
-    print(games_df.to_string(index=False))
+    print(f"Parsed games: {len(games)}")
+    print(f"Valid games: {len(valid_games)}")
+    print(f"Rejected games: {len(rejected_games)}")
+
+    print(valid_df.to_string(index=False))
+
+    if not rejected_df.empty:
+        print("\nRejected games:")
+        print(rejected_df.to_string(index=False))
+
+    return valid_games, rejected_games
+
+
+if __name__ == "__main__":
+    run_pipeline()
 
 if __name__ == "__main__":
     run_pipeline()

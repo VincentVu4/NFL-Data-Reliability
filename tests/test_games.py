@@ -1,8 +1,7 @@
 from datetime import datetime, timezone
 
-from src.pipeline import parse_games
 from src.validation import validate_games
-
+from src.pipeline import calculate_game_hash, parse_games
 
 def create_valid_game():
     return {
@@ -11,12 +10,17 @@ def create_valid_game():
         "season": 2026,
         "week": 1,
         "game_state": "in",
+        "status_name": "STATUS_IN_PROGRESS",
+        "status_detail": "7:32 - 2nd Quarter",
+        "completed": False,
+        "period": 2,
+        "clock": "7:32",
         "home_team_id": "26",
         "home_team_name": "Seattle Seahawks",
         "home_score": 7,
         "away_team_id": "17",
         "away_team_name": "New England Patriots",
-        "away_score": 0
+        "away_score": 7
     }
 
 
@@ -102,3 +106,23 @@ def test_malformed_event_is_quarantined():
     assert len(parsing_rejections) == 1
     assert parsing_rejections[0]["game_id"] == "broken-game"
     assert parsing_rejections[0]["rejection_stage"] == "parsing"
+
+def test_identical_game_states_have_same_hash():
+    first_game = create_valid_game()
+    second_game = create_valid_game()
+
+    first_hash = calculate_game_hash(first_game)
+    second_hash = calculate_game_hash(second_game)
+
+    assert first_hash == second_hash
+
+def test_score_change_creates_different_hash():
+    first_game = create_valid_game()
+    second_game = create_valid_game()
+
+    second_game["home_score"] = 14
+
+    first_hash = calculate_game_hash(first_game)
+    second_hash = calculate_game_hash(second_game)
+
+    assert first_hash != second_hash

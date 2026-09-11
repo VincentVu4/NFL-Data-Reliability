@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
+import hashlib
 import pandas as pd
 import requests
 
@@ -87,6 +88,29 @@ def save_quarantined_games(rejected_games, retrieved_at):       # Rejected nfl g
 
     return file_path
 
+def calculate_game_hash(game):
+    tracked_fields = {
+        "game_id": game["game_id"],
+        "scheduled_at": game["scheduled_at"],
+        "game_state": game["game_state"],
+        "status_name": game["status_name"],
+        "status_detail": game["status_detail"],
+        "completed": game["completed"],
+        "period": game["period"],
+        "clock": game["clock"],
+        "home_score": game["home_score"],
+        "away_score": game["away_score"]
+    }
+
+    serialized_game = json.dumps(
+        tracked_fields,
+        sort_keys=True
+    )
+
+    return hashlib.sha256(
+        serialized_game.encode("utf-8")
+    ).hexdigest()
+
 def parse_games(raw_nfl_data, retrieved_at):
     parsed_games = []
     parsing_rejections = []
@@ -138,6 +162,8 @@ def parse_games(raw_nfl_data, retrieved_at):
                 "retrieved_at": retrieved_at.isoformat(),
                 "source": "ESPN"
             }
+            game["record_hash"] = calculate_game_hash(game)
+
             parsed_games.append(game)
         except (
             KeyError,

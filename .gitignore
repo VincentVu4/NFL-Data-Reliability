@@ -21,10 +21,10 @@ htmlcov/
 !.env.example
 
 # Generated pipeline data
+data/audit/
 data/raw/
 data/processed/
 data/quarantine/
-
 # Pipeline logs
 logs/
 *.log

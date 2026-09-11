@@ -1,3 +1,6 @@
+from datetime import datetime, timezone
+
+from src.pipeline import parse_games
 from src.validation import validate_games
 
 
@@ -78,3 +81,24 @@ def test_valid_and_invalid_games_are_separated():
     assert len(rejected_games) == 1
     assert valid_games[0]["game_id"] == "401872656"
     assert rejected_games[0]["game_id"] == "different-game"
+
+def test_malformed_event_is_quarantined():
+    nfl_data = {
+        "events": [
+            {
+                "id": "broken-game"
+            }
+        ]
+    }
+
+    retrieved_at = datetime.now(timezone.utc)
+
+    parsed_games, parsing_rejections = parse_games(
+        nfl_data,
+        retrieved_at
+    )
+
+    assert len(parsed_games) == 0
+    assert len(parsing_rejections) == 1
+    assert parsing_rejections[0]["game_id"] == "broken-game"
+    assert parsing_rejections[0]["rejection_stage"] == "parsing"

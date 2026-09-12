@@ -88,6 +88,73 @@ def save_quarantined_games(rejected_games, retrieved_at):       # Rejected nfl g
 
     return file_path
 
+def classify_game_changes(
+    valid_games,
+    state_file_path=Path("data/state/latest_games.json")
+):
+    state_file_path.parent.mkdir(
+        parents=True,
+        exist_ok=True
+    )
+
+    if state_file_path.exists():
+        with state_file_path.open(
+            "r",
+            encoding="utf-8"
+        ) as file:
+            previous_state = json.load(file)
+    else:
+        previous_state = {}
+
+    updated_state = previous_state.copy()
+
+    for game in valid_games:
+        game_id = game["game_id"]
+        current_hash = game["record_hash"]
+
+        previous_game = previous_state.get(game_id)
+        previous_hash = None
+
+        if previous_game:
+            previous_hash = previous_game.get("record_hash")
+
+        if previous_game is None:
+            change_type = "NEW"
+            last_changed_at = game["retrieved_at"]
+
+        elif previous_hash != current_hash:
+            change_type = "CHANGED"
+            last_changed_at = game["retrieved_at"]
+
+        else:
+            change_type = "UNCHANGED"
+            last_changed_at = previous_game.get(
+                "last_changed_at",
+                game["retrieved_at"]
+            )
+
+        game["change_type"] = change_type
+        game["previous_record_hash"] = previous_hash
+        game["last_changed_at"] = last_changed_at
+
+        updated_state[game_id] = {
+            "record_hash": current_hash,
+            "last_seen_at": game["retrieved_at"],
+            "last_changed_at": last_changed_at
+        }
+
+    temporary_path = state_file_path.with_suffix(".tmp")
+
+    with temporary_path.open(
+        "w",
+        encoding="utf-8"
+    ) as file:
+        json.dump(updated_state, file, indent=2)
+
+    temporary_path.replace(state_file_path)
+
+    return valid_games
+
 def calculate_game_hash(game):
     tracked_fields = {
         "game_id": game["game_id"],
@@ -282,6 +349,8 @@ def run_pipeline():
         valid_games, validation_rejections = validate_games(
             games
         )
+
+        valid_games = classify_game_changes(valid_games)
 
         all_rejected_games = (
             parsing_rejections + validation_rejections

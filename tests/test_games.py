@@ -1,7 +1,11 @@
 from datetime import datetime, timezone
 
 from src.validation import validate_games
-from src.pipeline import calculate_game_hash, parse_games
+from src.pipeline import (
+    calculate_game_hash,
+    classify_game_changes,
+    parse_games
+)
 
 def create_valid_game():
     return {
@@ -126,3 +130,80 @@ def test_score_change_creates_different_hash():
     second_hash = calculate_game_hash(second_game)
 
     assert first_hash != second_hash
+
+def test_first_game_snapshot_is_new(tmp_path):
+    game = create_valid_game()
+    game["retrieved_at"] = "2026-09-11T10:00:00+00:00"
+    game["record_hash"] = calculate_game_hash(game)
+
+    state_path = tmp_path / "latest_games.json"
+
+    results = classify_game_changes(
+        [game],
+        state_path
+    )
+
+    assert results[0]["change_type"] == "NEW"
+    assert results[0]["previous_record_hash"] is None
+    assert state_path.exists()
+
+def test_identical_second_snapshot_is_unchanged(tmp_path):
+    state_path = tmp_path / "latest_games.json"
+
+    first_game = create_valid_game()
+    first_game["retrieved_at"] = (
+        "2026-09-11T10:00:00+00:00"
+    )
+    first_game["record_hash"] = calculate_game_hash(first_game)
+
+    classify_game_changes([first_game], state_path)
+
+    second_game = create_valid_game()
+    second_game["retrieved_at"] = (
+        "2026-09-11T10:05:00+00:00"
+    )
+    second_game["record_hash"] = calculate_game_hash(second_game)
+
+    results = classify_game_changes(
+        [second_game],
+        state_path
+    )
+
+    assert results[0]["change_type"] == "UNCHANGED"
+    assert results[0]["previous_record_hash"] == (
+        second_game["record_hash"]
+    )
+    assert results[0]["last_changed_at"] == (
+        "2026-09-11T10:00:00+00:00"
+    )
+
+def test_score_change_is_classified_as_changed(tmp_path):
+    state_path = tmp_path / "latest_games.json"
+
+    first_game = create_valid_game()
+    first_game["retrieved_at"] = (
+        "2026-09-11T10:00:00+00:00"
+    )
+    first_game["record_hash"] = calculate_game_hash(first_game)
+
+    classify_game_changes([first_game], state_path)
+
+    second_game = create_valid_game()
+    second_game["home_score"] = 14
+    second_game["retrieved_at"] = (
+        "2026-09-11T10:05:00+00:00"
+    )
+    second_game["record_hash"] = calculate_game_hash(second_game)
+
+    results = classify_game_changes(
+        [second_game],
+        state_path
+    )
+
+    assert results[0]["change_type"] == "CHANGED"
+    assert results[0]["previous_record_hash"] != (
+        second_game["record_hash"]
+    )
+    assert results[0]["last_changed_at"] == (
+        "2026-09-11T10:05:00+00:00"
+    )

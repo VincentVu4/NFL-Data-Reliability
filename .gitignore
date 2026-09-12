@@ -25,6 +25,7 @@ data/audit/
 data/raw/
 data/processed/
 data/quarantine/
+data/state/
 # Pipeline logs
 logs/
 *.log

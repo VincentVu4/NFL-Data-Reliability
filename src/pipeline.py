@@ -9,25 +9,31 @@ from uuid import uuid4
 import pandas as pd
 import requests
 
+from src.config import (
+    DATA_DIRECTORY,
+    LOG_DIRECTORY,
+    MAX_ATTEMPTS,
+    REQUEST_TIMEOUT_SECONDS,
+    RETRY_DELAY_SECONDS,
+    SCOREBOARD_URL,
+    STALE_THRESHOLD_MINUTES
+)
+
 from src.validation import validate_games
 
 logger = logging.getLogger(__name__)
 
 
-def extract_nfl_data(max_attempts=3):
-    url = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
-
+def extract_nfl_data(max_attempts=MAX_ATTEMPTS):
     for attempt in range(1, max_attempts + 1):
         try:
             response = requests.get(
-                url,
-                timeout=30
+                SCOREBOARD_URL,
+                timeout=REQUEST_TIMEOUT_SECONDS
             )
 
             response.raise_for_status()
-            raw_nfl_data = response.json()
-           
-            return raw_nfl_data
+            return response.json()
 
         except requests.RequestException as error:
             logger.warning(
@@ -40,10 +46,10 @@ def extract_nfl_data(max_attempts=3):
             if attempt == max_attempts:
                 raise
 
-            time.sleep(2)
+            time.sleep(RETRY_DELAY_SECONDS)
 
 def save_raw_response(nfl_data, retrieved_at):
-    raw_directory = Path("data/raw")
+    raw_directory = DATA_DIRECTORY / "raw"
     raw_directory.mkdir(parents=True, exist_ok=True)
 
     timestamp = retrieved_at.strftime("%Y%m%dT%H%M%SZ")
@@ -61,7 +67,7 @@ def save_quarantined_games(rejected_games, retrieved_at):       # Rejected nfl g
         logger.info("No rejected games to quarantine")
         return None
 
-    quarantine_directory = Path("data/quarantine")
+    quarantine_directory = Path(DATA_DIRECTORY / "quarantine")
     quarantine_directory.mkdir(parents=True, exist_ok=True)
 
     timestamp = retrieved_at.strftime("%Y%m%dT%H%M%SZ")
@@ -90,12 +96,14 @@ def save_quarantined_games(rejected_games, retrieved_at):       # Rejected nfl g
 
 def classify_game_changes(
     valid_games,
-    state_file_path=Path("data/state/latest_games.json")
+    state_file_path=None
 ):
-    state_file_path.parent.mkdir(
-        parents=True,
-        exist_ok=True
-    )
+    if state_file_path is None:
+        state_file_path = (
+            DATA_DIRECTORY
+            / "state"
+            / "latest_games.json"
+        )
 
     if state_file_path.exists():
         with state_file_path.open(
@@ -201,7 +209,7 @@ def detect_stale_games(    # detects if a live game hasn't changed
 def save_reliability_alerts(   # alerts if stale game is detected
     stale_games,
     detected_at,
-    alerts_directory=Path("data/alerts")
+    alerts_directory=Path(DATA_DIRECTORY / "alerts")
 ):
     if not stale_games:
         logger.info("No reliability alerts generated")
@@ -372,7 +380,7 @@ def save_processed_games(valid_games, retrieved_at):
         logger.warning("No valid games to save")
         return None
 
-    processed_directory = Path("data/processed")
+    processed_directory = Path(DATA_DIRECTORY / "processed")
     processed_directory.mkdir(parents=True, exist_ok=True)
 
     timestamp = retrieved_at.strftime("%Y%m%dT%H%M%SZ")
@@ -410,10 +418,12 @@ def save_processed_games(valid_games, retrieved_at):
     return file_path
 
 def configure_logging():
-    log_directory = Path("logs")
-    log_directory.mkdir(parents=True, exist_ok=True)
+    LOG_DIRECTORY.mkdir(
+        parents=True,
+        exist_ok=True
+    )
 
-    log_file_path = log_directory / "pipeline.log"
+    log_file_path = LOG_DIRECTORY / "pipeline.log"
 
     logging.basicConfig(
         level=logging.INFO,
@@ -434,7 +444,7 @@ def configure_logging():
     return log_file_path
 
 def save_pipeline_audit(audit_record):      # Stores record for each run: Succeeded/Duration/Num of passed failed
-    audit_directory = Path("data/audit")
+    audit_directory = Path(DATA_DIRECTORY / "audit")
     audit_directory.mkdir(parents=True, exist_ok=True)
 
     file_path = audit_directory / "pipeline_runs.jsonl"
@@ -505,7 +515,7 @@ def run_pipeline():
 
         valid_games, stale_games = detect_stale_games(
             valid_games,
-            stale_threshold_minutes=10
+            stale_threshold_minutes=STALE_THRESHOLD_MINUTES
         )
         alerts_file_path = save_reliability_alerts(
             stale_games,

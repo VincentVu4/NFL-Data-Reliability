@@ -16,9 +16,8 @@ from src.config import (
     REQUEST_TIMEOUT_SECONDS,
     RETRY_DELAY_SECONDS,
     SCOREBOARD_URL,
-    STALE_THRESHOLD_MINUTES
+    STALE_THRESHOLD_MINUTES,
 )
-
 from src.validation import validate_games
 
 logger = logging.getLogger(__name__)
@@ -104,6 +103,12 @@ def classify_game_changes(
             / "state"
             / "latest_games.json"
         )
+    state_file_path = Path(state_file_path)
+
+    state_file_path.parent.mkdir(
+        parents=True,
+        exist_ok=True
+    )
 
     if state_file_path.exists():
         with state_file_path.open(

@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 import time
@@ -5,7 +6,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
-import hashlib
 import pandas as pd
 import requests
 
@@ -154,6 +154,49 @@ def classify_game_changes(
     temporary_path.replace(state_file_path)
 
     return valid_games
+
+def detect_stale_games(
+    valid_games,
+    stale_threshold_minutes=10
+):
+    stale_games = []
+
+    for game in valid_games:
+        game["reliability_status"] = "HEALTHY"
+        game["stale_minutes"] = 0.0
+        game["alert_reason"] = None
+
+        if game["game_state"] != "in":
+            game["reliability_status"] = "NOT_APPLICABLE"
+            continue
+
+        if game["change_type"] != "UNCHANGED":
+            continue
+
+        retrieved_at = datetime.fromisoformat(
+            game["retrieved_at"]
+        )
+
+        last_changed_at = datetime.fromisoformat(
+            game["last_changed_at"]
+        )
+
+        stale_minutes = (
+            retrieved_at - last_changed_at
+        ).total_seconds() / 60
+
+        game["stale_minutes"] = round(stale_minutes, 2)
+
+        if stale_minutes >= stale_threshold_minutes:
+            game["reliability_status"] = "STALE"
+            game["alert_reason"] = (
+                f"Live game has not changed for "
+                f"{round(stale_minutes, 2)} minutes"
+            )
+
+            stale_games.append(game.copy())
+
+    return valid_games, stale_games
 
 def calculate_game_hash(game):
     tracked_fields = {
@@ -322,6 +365,7 @@ def run_pipeline():
     valid_count = 0
     parsing_rejection_count = 0
     validation_rejection_count = 0
+    stale_game_count = 0
 
     raw_file_path = None
     processed_file_path = None
@@ -352,6 +396,11 @@ def run_pipeline():
 
         valid_games = classify_game_changes(valid_games)
 
+        valid_games, stale_games = detect_stale_games(
+            valid_games,
+            stale_threshold_minutes=10
+        )
+        
         all_rejected_games = (
             parsing_rejections + validation_rejections
         )
@@ -366,6 +415,8 @@ def run_pipeline():
             started_at
         )
 
+        print(f"Stale game alerts: {len(stale_games)}")
+        stale_game_count = len(stale_games)
         parsed_count = len(games)
         valid_count = len(valid_games)
         parsing_rejection_count = len(parsing_rejections)
@@ -417,6 +468,7 @@ def run_pipeline():
                 parsing_rejection_count
                 + validation_rejection_count
             ),
+            "stale_game_count": stale_game_count,
             "raw_file_path": (
                 str(raw_file_path)
                 if raw_file_path else None

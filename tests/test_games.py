@@ -4,7 +4,8 @@ from src.validation import validate_games
 from src.pipeline import (
     calculate_game_hash,
     classify_game_changes,
-    parse_games
+    parse_games,
+    detect_stale_games,
 )
 
 def create_valid_game():
@@ -207,3 +208,61 @@ def test_score_change_is_classified_as_changed(tmp_path):
     assert results[0]["last_changed_at"] == (
         "2026-09-11T10:05:00+00:00"
     )
+
+def test_live_unchanged_game_becomes_stale():
+    game = create_valid_game()
+
+    game["game_state"] = "in"
+    game["change_type"] = "UNCHANGED"
+    game["last_changed_at"] = (
+        "2026-09-12T10:00:00+00:00"
+    )
+    game["retrieved_at"] = (
+        "2026-09-12T10:15:00+00:00"
+    )
+
+    games, stale_games = detect_stale_games(
+        [game],
+        stale_threshold_minutes=10
+    )
+
+    assert games[0]["reliability_status"] == "STALE"
+    assert games[0]["stale_minutes"] == 15
+    assert len(stale_games) == 1
+
+def test_recently_changed_live_game_is_healthy():
+    game = create_valid_game()
+
+    game["game_state"] = "in"
+    game["change_type"] = "CHANGED"
+    game["last_changed_at"] = (
+        "2026-09-12T10:14:00+00:00"
+    )
+    game["retrieved_at"] = (
+        "2026-09-12T10:15:00+00:00"
+    )
+
+    games, stale_games = detect_stale_games([game])
+
+    assert games[0]["reliability_status"] == "HEALTHY"
+    assert len(stale_games) == 0
+
+def test_scheduled_game_is_not_checked_for_staleness():
+    game = create_valid_game()
+
+    game["game_state"] = "pre"
+    game["change_type"] = "UNCHANGED"
+    game["last_changed_at"] = (
+        "2026-09-12T08:00:00+00:00"
+    )
+    game["retrieved_at"] = (
+        "2026-09-12T10:00:00+00:00"
+    )
+
+    games, stale_games = detect_stale_games([game])
+
+    assert (
+        games[0]["reliability_status"]
+        == "NOT_APPLICABLE"
+    )
+    assert len(stale_games) == 0

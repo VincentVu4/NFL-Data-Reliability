@@ -292,11 +292,11 @@ def calculate_game_hash(game):  # creates a hash to seralize games
         serialized_game.encode("utf-8")
     ).hexdigest()
 
-def parse_games(raw_nfl_data, retrieved_at):
+def parse_games(raw_nfl_data, retrieved_at): #loops through json file and grabs data for each game
     parsed_games = []
     parsing_rejections = []
 
-    for event in raw_nfl_data["events"]:                #loops through json file and grabs data for each game
+    for event in raw_nfl_data["events"]:                
         try:
             competition = event["competitions"][0]
             competitors = competition["competitors"]
@@ -409,6 +409,30 @@ def save_processed_games(valid_games, retrieved_at):
 
     return file_path
 
+def configure_logging():
+    log_directory = Path("logs")
+    log_directory.mkdir(parents=True, exist_ok=True)
+
+    log_file_path = log_directory / "pipeline.log"
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format=(
+            "%(asctime)s | %(levelname)s | "
+            "%(name)s | %(message)s"
+        ),
+        handlers=[
+            logging.FileHandler(
+                log_file_path,
+                encoding="utf-8"
+            ),
+            logging.StreamHandler()
+        ],
+        force=True
+    )
+
+    return log_file_path
+
 def save_pipeline_audit(audit_record):      # Stores record for each run: Succeeded/Duration/Num of passed failed
     audit_directory = Path("data/audit")
     audit_directory.mkdir(parents=True, exist_ok=True)
@@ -428,6 +452,7 @@ def parse_odds():
     pass
 
 def run_pipeline():
+    
     run_id = str(uuid4())
     started_at = datetime.now(timezone.utc)
     start_timer = time.perf_counter()
@@ -446,13 +471,22 @@ def run_pipeline():
     pipeline_status = "FAILED"
     error_message = None
 
+    logger.info(
+    "Starting pipeline run %s",
+    run_id
+)
+    
     try:
         raw_nfl_data = extract_nfl_data()
-
+        
         source_record_count = len(
             raw_nfl_data.get("events", [])
         )
-
+        logger.info(
+            "Received %s events from ESPN",
+            source_record_count
+        )
+        
         raw_file_path = save_raw_response(
             raw_nfl_data,
             started_at
@@ -478,7 +512,6 @@ def run_pipeline():
             started_at
         )
         
-        
         all_rejected_games = (
             parsing_rejections + validation_rejections
         )
@@ -493,12 +526,27 @@ def run_pipeline():
             started_at
         )
 
+        
+        
         print(f"Stale game alerts: {len(stale_games)}")
         stale_game_count = len(stale_games)
         parsed_count = len(games)
         valid_count = len(valid_games)
         parsing_rejection_count = len(parsing_rejections)
         validation_rejection_count = len(validation_rejections)
+
+        logger.info(
+            "Parsed=%s Valid=%s ParsingRejected=%s "
+            "ValidationRejected=%s",
+            parsed_count,
+            valid_count,
+            parsing_rejection_count,
+            validation_rejection_count
+        )
+        logger.info(
+            "Detected %s stale live games",
+            stale_game_count
+        )
 
         if alerts_file_path:
             print(f"Alerts file: {alerts_file_path}")
@@ -507,7 +555,11 @@ def run_pipeline():
             pipeline_status = "SUCCESS_WITH_REJECTIONS"
         else:
             pipeline_status = "SUCCESS"
-
+            logger.info(
+                "Pipeline run %s completed with status %s",
+                run_id,
+                pipeline_status
+            )
         return valid_games, all_rejected_games
 
     except Exception as error:
@@ -578,4 +630,11 @@ def run_pipeline():
 
 
 if __name__ == "__main__":
+    log_file_path = configure_logging()
+
+    logger.info(
+        "Logging initialized at %s",
+        log_file_path
+    )
+
     run_pipeline()

@@ -21,6 +21,7 @@ htmlcov/
 !.env.example
 
 # Generated pipeline data
+data/alerts/
 data/audit/
 data/raw/
 data/processed/

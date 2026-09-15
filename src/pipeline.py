@@ -155,7 +155,7 @@ def classify_game_changes(
 
     return valid_games
 
-def detect_stale_games(
+def detect_stale_games(    # detects if a live game hasn't changed
     valid_games,
     stale_threshold_minutes=10
 ):
@@ -198,7 +198,78 @@ def detect_stale_games(
 
     return valid_games, stale_games
 
-def calculate_game_hash(game):
+def save_reliability_alerts(   # alerts if stale game is detected
+    stale_games,
+    detected_at,
+    alerts_directory=Path("data/alerts")
+):
+    if not stale_games:
+        logger.info("No reliability alerts generated")
+        return None
+
+    alerts_directory.mkdir(
+        parents=True,
+        exist_ok=True
+    )
+
+    timestamp = detected_at.strftime("%Y%m%dT%H%M%SZ")
+    file_path = (
+        alerts_directory
+        / f"reliability_alerts_{timestamp}.json"
+    )
+
+    alerts = []
+
+    for game in stale_games:
+        incident_key = (
+            f"STALE_FEED:"
+            f"{game['game_id']}:"
+            f"{game['last_changed_at']}"
+        )
+
+        alert_id = hashlib.sha256(
+            incident_key.encode("utf-8")
+        ).hexdigest()
+
+        alert = {
+            "alert_id": alert_id,
+            "alert_type": "STALE_FEED",
+            "severity": "WARNING",
+            "source": game["source"],
+            "game_id": game["game_id"],
+            "home_team_name": game["home_team_name"],
+            "away_team_name": game["away_team_name"],
+            "game_state": game["game_state"],
+            "period": game["period"],
+            "clock": game["clock"],
+            "home_score": game["home_score"],
+            "away_score": game["away_score"],
+            "last_changed_at": game["last_changed_at"],
+            "detected_at": detected_at.isoformat(),
+            "stale_minutes": game["stale_minutes"],
+            "alert_reason": game["alert_reason"]
+        }
+
+        alerts.append(alert)
+
+    alert_output = {
+        "detected_at": detected_at.isoformat(),
+        "alert_count": len(alerts),
+        "alerts": alerts
+    }
+
+    with file_path.open("w", encoding="utf-8") as file:
+        json.dump(alert_output, file, indent=2)
+
+    logger.warning(
+        "%s reliability alerts saved to %s",
+        len(alerts),
+        file_path
+    )
+
+    return file_path
+
+def calculate_game_hash(game):  # creates a hash to seralize games
     tracked_fields = {
         "game_id": game["game_id"],
         "scheduled_at": game["scheduled_at"],
@@ -346,8 +417,9 @@ def save_pipeline_audit(audit_record):      # Stores record for each run: Succee
 
     with file_path.open("a", encoding="utf-8") as file:
         file.write(json.dumps(audit_record) + "\n")
-
+    
     return file_path
+
 
 def parse_play_by_play():
     pass
@@ -370,6 +442,7 @@ def run_pipeline():
     raw_file_path = None
     processed_file_path = None
     quarantine_file_path = None
+    alerts_file_path = None
     pipeline_status = "FAILED"
     error_message = None
 
@@ -400,6 +473,11 @@ def run_pipeline():
             valid_games,
             stale_threshold_minutes=10
         )
+        alerts_file_path = save_reliability_alerts(
+            stale_games,
+            started_at
+        )
+        
         
         all_rejected_games = (
             parsing_rejections + validation_rejections
@@ -421,6 +499,9 @@ def run_pipeline():
         valid_count = len(valid_games)
         parsing_rejection_count = len(parsing_rejections)
         validation_rejection_count = len(validation_rejections)
+
+        if alerts_file_path:
+            print(f"Alerts file: {alerts_file_path}")
 
         if all_rejected_games:
             pipeline_status = "SUCCESS_WITH_REJECTIONS"
@@ -469,6 +550,10 @@ def run_pipeline():
                 + validation_rejection_count
             ),
             "stale_game_count": stale_game_count,
+            "alerts_file_path": (
+                str(alerts_file_path)
+                if alerts_file_path else None
+            ),
             "raw_file_path": (
                 str(raw_file_path)
                 if raw_file_path else None

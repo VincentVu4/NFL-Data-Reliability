@@ -1,12 +1,15 @@
+import json
 from datetime import datetime, timezone
 
-from src.validation import validate_games
 from src.pipeline import (
     calculate_game_hash,
     classify_game_changes,
-    parse_games,
     detect_stale_games,
+    parse_games,
+    save_reliability_alerts,
 )
+from src.validation import validate_games
+
 
 def create_valid_game():
     return {
@@ -266,3 +269,58 @@ def test_scheduled_game_is_not_checked_for_staleness():
         == "NOT_APPLICABLE"
     )
     assert len(stale_games) == 0
+
+def test_stale_game_creates_alert_file(tmp_path):
+    detected_at = datetime(
+        2026,
+        9,
+        15,
+        12,
+        0,
+        tzinfo=timezone.utc
+    )
+
+    stale_game = create_valid_game()
+
+    stale_game.update({
+        "source": "ESPN",
+        "last_changed_at": (
+            "2026-09-15T11:45:00+00:00"
+        ),
+        "stale_minutes": 15.0,
+        "alert_reason": (
+            "Live game has not changed for 15.0 minutes"
+        )
+    })
+
+    file_path = save_reliability_alerts(
+        [stale_game],
+        detected_at,
+        tmp_path
+    )
+
+    assert file_path is not None
+    assert file_path.exists()
+
+    with file_path.open("r", encoding="utf-8") as file:
+        alert_data = json.load(file)
+
+    assert alert_data["alert_count"] == 1
+    assert alert_data["alerts"][0]["alert_type"] == (
+        "STALE_FEED"
+    )
+    assert alert_data["alerts"][0]["game_id"] == (
+        stale_game["game_id"]
+    )
+
+def test_no_stale_games_creates_no_alert_file(tmp_path):
+    detected_at = datetime.now(timezone.utc)
+
+    file_path = save_reliability_alerts(
+        [],
+        detected_at,
+        tmp_path
+    )
+
+    assert file_path is None
+    assert list(tmp_path.iterdir()) == []

@@ -46,3 +46,23 @@ LOG_DIRECTORY = Path(
         str(PROJECT_ROOT / "logs")
     )
 )
+
+ENABLE_ADLS_UPLOAD = (
+    os.getenv("ENABLE_ADLS_UPLOAD", "false").lower()
+    == "true"
+)
+
+AZURE_STORAGE_ACCOUNT_NAME = os.getenv(
+    "AZURE_STORAGE_ACCOUNT_NAME",
+    ""
+)
+
+AZURE_STORAGE_FILE_SYSTEM = os.getenv(
+    "AZURE_STORAGE_FILE_SYSTEM",
+    "nfl-data"
+)
+
+AZURE_LANDING_DIRECTORY = os.getenv(
+    "AZURE_LANDING_DIRECTORY",
+    "landing"
+)

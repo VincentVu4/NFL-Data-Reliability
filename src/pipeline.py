@@ -168,7 +168,15 @@ def classify_game_changes(
 
     return valid_games
 
-def detect_stale_games(    # detects if a live game hasn't changed
+from datetime import datetime
+
+
+PAUSED_STATUS_NAMES = {
+    "STATUS_DELAYED",
+}
+
+
+def detect_stale_games(
     valid_games,
     stale_threshold_minutes=10
 ):
@@ -179,11 +187,21 @@ def detect_stale_games(    # detects if a live game hasn't changed
         game["stale_minutes"] = 0.0
         game["alert_reason"] = None
 
-        if game["game_state"] != "in":
+        if game.get("game_state") != "in": # Only live games can become stale
             game["reliability_status"] = "NOT_APPLICABLE"
             continue
 
-        if game["change_type"] != "UNCHANGED":
+        
+        if game.get("status_name") in PAUSED_STATUS_NAMES: # A known game delay is an expected pause
+            game["reliability_status"] = "PAUSED"
+            game["alert_reason"] = (
+                f"Updates paused because game status is "
+                f"{game['status_name']}"
+            )
+            continue
+
+        # A game that just changed is healthy
+        if game.get("change_type") != "UNCHANGED":
             continue
 
         retrieved_at = datetime.fromisoformat(
@@ -204,7 +222,7 @@ def detect_stale_games(    # detects if a live game hasn't changed
             game["reliability_status"] = "STALE"
             game["alert_reason"] = (
                 f"Live game has not changed for "
-                f"{round(stale_minutes, 2)} minutes"
+                f"{game['stale_minutes']} minutes"
             )
 
             stale_games.append(game.copy())
@@ -395,7 +413,6 @@ def save_processed_games(valid_games, retrieved_at):
     )
 
     games_df = pd.DataFrame(valid_games)
-
     games_df["scheduled_at"] = pd.to_datetime(
         games_df["scheduled_at"],
         utc=True,
@@ -407,7 +424,6 @@ def save_processed_games(valid_games, retrieved_at):
         utc=True,
         errors="coerce"
     )
-
     games_df.to_parquet(
         file_path,
         index=False,
@@ -653,3 +669,10 @@ if __name__ == "__main__":
     )
 
     run_pipeline()
+
+
+class Object:
+    def __init__(self, id, name):
+        self.id = id
+        self.name = name
+    

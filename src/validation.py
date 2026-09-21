@@ -47,7 +47,7 @@ def validate_games(games):
             rejected_games.append(rejected_game)
         else:
             valid_games.append(game)
-
+    
     return valid_games, rejected_games
 
 def run_tests():

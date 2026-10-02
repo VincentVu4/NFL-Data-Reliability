@@ -3,6 +3,7 @@ import json
 import pandas as pd
 
 import src.pipeline as pipeline
+from src.config import MAX_ATTEMPTS
 
 
 def create_mock_espn_response():
@@ -76,10 +77,13 @@ def test_pipeline_runs_end_to_end(
     mock_response = create_mock_espn_response()
 
     monkeypatch.setattr(
-        pipeline,
-        "extract_nfl_data",
-        lambda: mock_response
-    )
+    pipeline,
+    "extract_nfl_data",
+    lambda season=None,
+           season_type=None,
+           week=None,
+           max_attempts=MAX_ATTEMPTS: mock_response
+)
 
     valid_games, rejected_games = pipeline.run_pipeline()
 

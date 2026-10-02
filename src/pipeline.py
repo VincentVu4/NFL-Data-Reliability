@@ -9,8 +9,10 @@ from uuid import uuid4
 import pandas as pd
 import requests
 
+from src.adls_storage import upload_file_to_adls
 from src.config import (
     DATA_DIRECTORY,
+    ENABLE_ADLS_UPLOAD,
     LOG_DIRECTORY,
     MAX_ATTEMPTS,
     REQUEST_TIMEOUT_SECONDS,
@@ -23,15 +25,38 @@ from src.validation import validate_games
 logger = logging.getLogger(__name__)
 
 
-def extract_nfl_data(max_attempts=MAX_ATTEMPTS):
+def extract_nfl_data(
+    max_attempts=MAX_ATTEMPTS,
+    season=None,
+    season_type=None,
+    week=None
+):
+    request_parameters = {}
+
+    if season is not None:
+        request_parameters["dates"] = season
+
+    if season_type is not None:
+        request_parameters["seasontype"] = season_type
+
+    if week is not None:
+        request_parameters["week"] = week
+
     for attempt in range(1, max_attempts + 1):
         try:
+            logger.info(
+                "Requesting ESPN scoreboard with parameters: %s",
+                request_parameters or "current scoreboard"
+            )
+
             response = requests.get(
                 SCOREBOARD_URL,
+                params=request_parameters,
                 timeout=REQUEST_TIMEOUT_SECONDS
             )
 
             response.raise_for_status()
+
             return response.json()
 
         except requests.RequestException as error:
@@ -47,17 +72,64 @@ def extract_nfl_data(max_attempts=MAX_ATTEMPTS):
 
             time.sleep(RETRY_DELAY_SECONDS)
 
-def save_raw_response(nfl_data, retrieved_at):
+def save_raw_response(
+    nfl_data,
+    retrieved_at,
+    season=None,
+    season_type=None,
+    week=None
+):
     raw_directory = DATA_DIRECTORY / "raw"
-    raw_directory.mkdir(parents=True, exist_ok=True)
+    raw_directory.mkdir(
+        parents=True,
+        exist_ok=True
+    )
 
-    timestamp = retrieved_at.strftime("%Y%m%dT%H%M%SZ")
-    file_path = raw_directory / f"nfl_scoreboard_{timestamp}.json"
+    timestamp = retrieved_at.strftime(
+        "%Y%m%dT%H%M%S%fZ"
+    )
 
-    with file_path.open("w", encoding="utf-8") as file:
-        json.dump(nfl_data, file, indent=2)
+    filename_parts = ["nfl_scoreboard"]
 
-    logger.info("Raw response saved to %s", file_path)
+    if season is not None:
+        filename_parts.append(str(season))
+    
+    if season_type is not None:
+        season_type_names = {
+            1: "preseason",
+            2: "regular",
+            3: "postseason"
+        }
+
+        filename_parts.append(
+            season_type_names.get(
+                season_type,
+                f"season_type_{season_type}"
+            )
+        )
+
+    if week is not None:
+        filename_parts.append(
+            f"week_{week:02d}"
+        )
+    filename_parts.append(timestamp)
+    file_name = "_".join(filename_parts) + ".json"
+    file_path = raw_directory / file_name
+
+    with file_path.open(
+        "w",
+        encoding="utf-8"
+    ) as file:
+        json.dump(
+            nfl_data,
+            file,
+            indent=2
+        )
+
+    logger.info(
+        "Raw response saved to %s",
+        file_path
+    )
 
     return file_path
 
@@ -482,7 +554,9 @@ def parse_play_by_play():
 def parse_odds():
     pass
 
-def run_pipeline():
+def run_pipeline(season=None,
+            season_type=None,
+            week=None):
     
     run_id = str(uuid4())
     started_at = datetime.now(timezone.utc)
@@ -496,6 +570,7 @@ def run_pipeline():
     stale_game_count = 0
 
     raw_file_path = None
+    raw_adls_uri = None
     processed_file_path = None
     quarantine_file_path = None
     alerts_file_path = None
@@ -508,7 +583,11 @@ def run_pipeline():
 )
     
     try:
-        raw_nfl_data = extract_nfl_data()
+        raw_nfl_data = extract_nfl_data(
+            season = season,
+            season_type = season_type,
+            week = week
+        )
         
         source_record_count = len(
             raw_nfl_data.get("events", [])
@@ -520,8 +599,20 @@ def run_pipeline():
         
         raw_file_path = save_raw_response(
             raw_nfl_data,
-            started_at
+            started_at,
+            season,
+            season_type,
+            week
         )
+        if ENABLE_ADLS_UPLOAD:
+            raw_adls_uri = upload_file_to_adls(
+                raw_file_path
+            )
+
+            logger.info(
+                "Raw snapshot uploaded to %s",
+                raw_adls_uri
+            )
 
         games, parsing_rejections = parse_games(
             raw_nfl_data,
@@ -649,6 +740,7 @@ def run_pipeline():
                 str(quarantine_file_path)
                 if quarantine_file_path else None
             ),
+            "raw_adls_uri": raw_adls_uri,
             "error_message": error_message
         }
 
@@ -668,11 +760,14 @@ if __name__ == "__main__":
         log_file_path
     )
 
-    run_pipeline()
+    for i in range(1, 5):
+
+        run_pipeline(
+            season=2026,
+            season_type=2,
+            week=i
+        )
+
+ 
 
 
-class Object:
-    def __init__(self, id, name):
-        self.id = id
-        self.name = name
-    

@@ -12,8 +12,7 @@ load_dotenv(PROJECT_ROOT / ".env")
 SCOREBOARD_URL = os.getenv(
     "SCOREBOARD_URL",
     (
-        "https://site.api.espn.com/apis/site/v2/"
-        "sports/football/nfl/scoreboard"
+        "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
     )
 )
 

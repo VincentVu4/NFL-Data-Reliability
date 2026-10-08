@@ -1,179 +1,196 @@
 # NFL Data Reliability Platform
 
-An automated data engineering platform that ingests live NFL scoreboard data, preserves immutable raw snapshots, validates and quarantines malformed records, detects game-state changes, and raises reliability alerts when live data becomes stale.
+An automated data engineering project that ingests NFL scoreboard data from ESPN, preserves raw JSON snapshots, validates game records, and builds reporting tables in Databricks for Power BI.
 
-The project is designed to model a production data pipeline rather than a one-time sports analysis. Its focus is data quality, observability, fault tolerance, and reproducible processing.
+The scheduled cloud workflow runs extraction and Bronze, Silver, and Gold processing in Databricks. A separate local Python pipeline implements additional reliability features, including change detection, stale-game alerts, structured logging, and audit records.
 
 ## Why This Project Exists
 
-Real-time data feeds can fail in ways that are not obvious. An API may return a successful HTTP response while still providing incomplete, duplicated, malformed, or stale data. This pipeline monitors both delivery and data quality so downstream analytics do not blindly trust an unhealthy feed.
+A successful HTTP response does not guarantee trustworthy data. Sports feeds can contain incomplete, duplicated, malformed, or stale records. This project explores data quality, replayable processing, orchestration, and operational monitoring using a real NFL feed.
+
+## Current Architecture
+
+```mermaid
+flowchart TD
+    A[ESPN scoreboard] --> B[Scheduled Databricks extraction]
+    B --> C[Raw JSON in Unity Catalog volume]
+    C --> D[Bronze tables]
+    D --> E[Silver validation and latest game records]
+    E --> F[Gold reporting tables]
+    F --> G[Power BI Import model]
+```
+
+The Databricks job runs tasks in order: **Extract → Bronze → Silver → Gold**. Each downstream task depends on its predecessor succeeding. Power BI connects directly to Databricks, removing manual CSV downloads and replacements. Report data updates when the Import model is refreshed; it is not a continuously live connection.
 
 ## Current Capabilities
 
-- Extracts real NFL scoreboard data from ESPN with timeouts, retries, and HTTP error handling
-- Saves timestamped raw JSON snapshots for replay and auditing
-- Parses nested API responses into flat game-level records
-- Validates required identifiers, teams, scores, game states, and data types
-- Quarantines malformed and invalid records with rejection reasons
-- Writes valid records to Parquet with UTC timestamps and preserved data types
-- Generates SHA-256 fingerprints for game-state comparison
-- Classifies snapshots as `NEW`, `CHANGED`, or `UNCHANGED`
+### Scheduled Databricks workflow
+
+- Fetches ESPN scoreboard JSON directly from a Databricks extraction notebook
+- Saves timestamped snapshots in a Unity Catalog volume
+- Runs extraction and Bronze, Silver, and Gold notebooks as a scheduled job
+- Rebuilds Bronze and Silver from the accumulated landing files
+- Parses and validates records in Silver, separating valid and invalid data
+- Selects the most recent snapshot per game rather than retaining duplicate current-game records
+- Builds Gold tables for current games, team performance, and team-game results
+- Supplies Power BI through a direct Databricks connection in Import mode
+- Runs without requiring the local development computer to remain on
+
+### Local Python reliability pipeline
+
+- Extracts scoreboard data with timeouts, retries, and HTTP error handling
+- Saves raw JSON for replay and auditing
+- Parses nested responses into typed game-level records
+- Validates identifiers, teams, scores, game states, and data types
+- Quarantines rejected records with reasons
+- Writes validated records to Parquet
+- Uses SHA-256 fingerprints to classify games as `NEW`, `CHANGED`, or `UNCHANGED`
 - Detects potentially stale live games using configurable thresholds
-- Produces deterministic reliability-alert identifiers for downstream deduplication
-- Records pipeline status, duration, file locations, and record counts in an audit log
-- Writes structured operational logs to the terminal and a log file
-- Uses environment-based configuration for local and future cloud execution
-- Includes unit and mocked end-to-end tests with pytest
+- Creates deterministic reliability-alert identifiers
+- Records pipeline status, duration, file locations, and record counts
+- Writes structured terminal and file logs
+- Supports raw-file upload to Databricks and optional ADLS upload
+- Can trigger the existing Databricks job after successful uploads
+- Includes unit tests and mocked end-to-end tests
 
-## Pipeline Architecture
-
-```text
-ESPN NFL Scoreboard API
-          |
-          v
-Retry-aware extraction
-          |
-          +--------------------> Raw JSON snapshots
-          |
-          v
-Fault-tolerant parsing
-          |
-          v
-Validation
-     /          \
-    v            v
-Valid games    Rejected games
-    |            |
-    v            v
-Parquet       Quarantine JSON
-    |
-    v
-Change detection
-    |
-    v
-Stale-feed alerts + pipeline audit records
-```
+The scheduled extraction notebook currently bypasses the local reliability processing. Change detection, stale detection, and their reporting outputs still need verification or implementation in the Databricks execution path. Local extraction retries do not imply that the scheduled notebook has equivalent retries.
 
 ## Technology Stack
 
 | Area | Technology |
 |---|---|
-| Language | Python 3.12 |
+| Language | Python 3.12 for local development; Python in Databricks |
 | API ingestion | Requests |
-| Transformation | pandas |
-| Analytical storage | Apache Parquet / PyArrow |
+| Local transformation | pandas |
+| Local analytical files | Apache Parquet / PyArrow |
+| Cloud processing and tables | Databricks Free Edition and Delta Lake |
+| Scheduled orchestration | Databricks Jobs |
+| Active raw landing storage | Unity Catalog volume |
+| Additional storage integration | Azure Data Lake Storage Gen2, optional local upload |
+| Databricks integration | Databricks SDK and CLI OAuth authentication |
+| Reporting | Power BI Desktop, Databricks connection in Import mode |
 | Testing | pytest |
-| Configuration | python-dotenv |
+| Local configuration | python-dotenv |
 | Version control | Git and GitHub |
-| Planned cloud storage | Azure Data Lake Storage Gen2 |
-| Planned processing | Azure Databricks and Delta Lake |
-| Planned reporting | Power BI |
 
-## Repository Structure
+ADLS integration was implemented separately. The current scheduled workflow lands files directly in the Databricks volume; it does not require an ADLS handoff.
 
-```text
-nfl-data-reliability/
-|-- src/
-|   |-- __init__.py
-|   |-- config.py
-|   |-- pipeline.py
-|   `-- validation.py
-|-- tests/
-|   |-- test_games.py
-|   `-- test_pipeline_e2e.py
-|-- data/                  # Generated locally and excluded from Git
-|   |-- raw/
-|   |-- processed/
-|   |-- quarantine/
-|   |-- alerts/
-|   |-- audit/
-|   `-- state/
-|-- logs/                  # Generated locally and excluded from Git
-|-- .env.example
-|-- .gitignore
-|-- requirements.txt
-`-- README.md
-```
+## Repository Organization
 
-## Getting Started
+The local project includes `src/pipeline.py`, `src/config.py`, `src/validation.py`, unit and end-to-end tests, `.env.example`, and `requirements.txt`.
 
-### 1. Clone the repository
+Generated local outputs are excluded from Git:
+
+| Directory | Contents |
+|---|---|
+| `data/raw/` | Raw JSON snapshots |
+| `data/processed/` | Validated Parquet records |
+| `data/quarantine/` | Rejected records and reasons |
+| `data/alerts/` | Reliability alerts |
+| `data/audit/` | Pipeline audit records |
+| `data/state/` | Previous game state |
+| `logs/` | Operational logs |
+
+The scheduled notebooks and job are configured in the Databricks workspace. Exporting and versioning those workspace assets in this repository remains a documentation and reproducibility task.
+
+## Local Setup
+
+### 1. Clone and create an environment
 
 ```powershell
 git clone <repository-url>
 cd nfl-data-reliability
-```
-
-### 2. Create and activate a virtual environment
-
-```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 ```
 
-### 3. Install dependencies
+### 2. Install dependencies and configure
 
 ```powershell
 python -m pip install -r requirements.txt
-```
-
-### 4. Create local configuration
-
-```powershell
 Copy-Item .env.example .env
 ```
 
-### 5. Run the pipeline
+Review configuration and execution settings before running. The local pipeline can upload files and trigger a real Databricks job; it is not necessarily a local-only command.
+
+### 3. Authenticate for local Databricks operations
+
+Install the Databricks CLI, then authorize the profile used by the project:
+
+```powershell
+databricks auth login --host "https://YOUR-WORKSPACE-HOST" --profile nfl-project
+```
+
+Use the workspace base URL without notebook paths, query strings, or `/oidc`. Configure the intended volume path and job ID in the project. Do not commit credentials or authentication profiles.
+
+### 4. Run the local pipeline
 
 ```powershell
 python -m src.pipeline
 ```
 
-### 6. Run the test suite
+Check the configured season and requested weeks before execution. For backfill, request the missing historical weeks. Routine updates do not require re-fetching every prior week.
+
+### 5. Run tests
 
 ```powershell
 python -m pytest -v
 ```
 
-## Data Layers
+Tests should use controlled API responses and replace external uploads with mocks. The end-to-end test uses a temporary data directory, mocks Databricks upload, and disables ADLS upload.
 
-| Layer | Output | Purpose |
-|---|---|---|
-| Raw / Bronze | Timestamped JSON | Preserves the source response exactly as received |
-| Processed / Silver | Parquet game snapshots | Provides typed, validated, flattened records |
-| Quarantine | JSON rejected records | Preserves invalid data and rejection reasons |
-| Operational | Audit, state, alerts, and logs | Supports monitoring, troubleshooting, and change detection |
+## Scheduled Cloud Execution
 
-## Reliability Rules
+1. Maintain the extraction, Bronze, Silver, and Gold notebooks in Databricks.
+2. Save extraction output into the volume landing folder consumed by Bronze.
+3. Configure one job with sequential task dependencies.
+4. Run the complete job manually and verify historical games remain in Gold.
+5. Enable a scheduled trigger and keep maximum concurrent runs at one for the full-load workflow.
+6. Inspect job results and refresh Power BI to retrieve updated Gold data.
 
-The current validation layer checks for:
+The extractor uses ESPN's default scoreboard response and reads its season and week metadata. This avoids a permanently hardcoded week, but does not guarantee historical completeness. Historical backfill remains a separate operation.
 
-- Missing game, team, or schedule identifiers
-- Invalid season and week types
-- Identical home and away teams
-- Invalid or negative scores
-- Unexpected game states
-- Missing or malformed nested API structures
-- Live games that remain unchanged beyond the configured stale threshold
+## Data Layers and Reload Behavior
 
-## Testing Strategy
+| Layer | Purpose |
+|---|---|
+| Landing JSON | Retains historical raw source snapshots |
+| Bronze | Loads source snapshots for downstream processing |
+| Silver | Parses, validates, separates invalid records, and selects latest game records |
+| Gold | Provides reporting tables and performance metrics |
+| Local operational outputs | Stores local audit records, state, alerts, and logs |
 
-Unit tests cover validation, hashing, state classification, stale-feed detection, and alert creation. A mocked end-to-end test replaces the live API call with controlled ESPN-shaped data and verifies that the complete pipeline produces raw, processed, state, and audit outputs inside an isolated temporary directory.
+Current processing uses full loads over accumulated JSON files rather than incremental ingestion. Latest-record selection must be scoped to each `game_id` and ordered by retrieval timestamp. Selecting only the newest file or week would discard historical games.
 
-## Roadmap
+Keep older valid snapshots for replay. Deleting a record only from Gold, Silver, or Bronze is temporary when an upstream full load can recreate it. To exclude unwanted test snapshots, remove them from landing or apply an explicit exclusion rule before rebuilding downstream tables.
 
-- Store raw and processed datasets in Azure Data Lake Storage Gen2
-- Orchestrate scheduled ingestion during live NFL windows
-- Transform snapshots into Bronze, Silver, and Gold Delta tables in Databricks
-- Add play-by-play ingestion and sequence-quality checks
-- Add a secondary provider for cross-source score and status comparisons
-- Publish freshness, completeness, rejection, and latency metrics to Power BI
+## Reliability and Testing
+
+Local validation covers missing identifiers or nested structures, invalid season/week types, identical teams, invalid or negative scores, and unexpected game states. Local stale detection separately evaluates unchanged live games against a configured threshold.
+
+Unit tests cover validation, hashing, state classification, stale detection, and alert creation. The mocked end-to-end test verifies raw, processed, state, and audit outputs in an isolated temporary directory without real uploads.
+
+Cloud verification includes task completion, landing-file creation, retention of historical weeks, and agreement between Gold and Power BI. Duplicate-safe reruns and invalid-record handling should also be demonstrated explicitly. Local tests alone do not establish correctness of the scheduled notebooks.
+
+## Remaining Work
+
+- Add retry handling to scheduled extraction and configure job failure notifications
+- Verify or implement change detection and stale-game alerts in Databricks
+- Publish freshness, rejection, completeness, and latency metrics to reporting tables
+- Demonstrate duplicate-safe reruns and quarantine behavior with controlled data
+- Automate Power BI Import refresh where the deployment and licensing support it
+- Export notebooks and job configuration into version control
+- Document schemas, backfill, recovery, and reproducible setup
 - Add CI checks for tests and code quality
+
+Possible later extensions include incremental loading, play-by-play sequence checks, and cross-provider score/status comparisons.
 
 ## Project Status
 
-The local ingestion and reliability foundation is complete. Azure storage, Databricks transformations, scheduling, play-by-play ingestion, cross-source validation, and Power BI reporting remain roadmap work and are not represented as completed features.
+The scheduled Databricks ingestion and Bronze/Silver/Gold workflow is working, and Power BI reads directly from Databricks. The local Python reliability foundation is also implemented. Remaining work focuses on verifying reliability features in the scheduled path, operational monitoring, refresh automation, and reproducibility.
+
+The current deployment is scheduled batch processing, not continuous real-time monitoring. Its freshness depends on the job schedule and Power BI refresh. Databricks Free Edition compute quotas also constrain execution frequency.
 
 ## Data Source Note
 
-This project uses a publicly accessible ESPN JSON endpoint for educational and portfolio purposes. The endpoint is not represented as an officially supported public ESPN API and may change without notice. That instability is treated as a realistic reliability-engineering constraint.
+This project uses a publicly accessible ESPN JSON endpoint for educational and portfolio purposes. It is not represented as an officially supported public ESPN API and may change without notice. That instability is treated as a realistic reliability-engineering constraint.
